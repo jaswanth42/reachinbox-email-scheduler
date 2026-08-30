@@ -1,8 +1,12 @@
-# ReachInbox Full-stack Email Scheduler
+# ReachInbox Full-Stack Email Scheduler
 
-A production-oriented full-stack email scheduling system built for the ReachInbox hiring assignment. The application supports persistent email scheduling, BullMQ-based delayed jobs, PostgreSQL persistence, Redis-backed rate limiting, Elasticsearch search, Ethereal SMTP, Google OAuth, Slack notifications, and a Bull Board queue dashboard.
+A production-oriented full-stack email scheduling system built for the ReachInbox hiring assignment.
 
-## Tech Stack
+The application allows users to authenticate, upload email leads, schedule emails for future delivery, process them reliably using BullMQ and Redis, send them through Ethereal SMTP, search sent emails through Elasticsearch, and receive Slack notifications when an hourly sending limit is reached.
+
+---
+
+## 🚀 Tech Stack
 
 ### Backend
 
@@ -12,10 +16,12 @@ A production-oriented full-stack email scheduling system built for the ReachInbo
 * BullMQ
 * Redis
 * Elasticsearch
-* Ethereal Email / SMTP
-* Bull Board
+* Nodemailer
+* Ethereal Email
+* JWT
 * Google OAuth 2.0
-* Slack OAuth v2
+* Slack OAuth 2.0
+* Bull Board
 
 ### Frontend
 
@@ -23,29 +29,69 @@ A production-oriented full-stack email scheduling system built for the ReachInbo
 * TypeScript
 * Vite
 * CSS
+* Responsive dashboard UI
 
-## Project Structure
+### Infrastructure
+
+* Docker
+* Docker Compose
+
+---
+
+# 📁 Project Structure
 
 ```text
 reachinbox-email-scheduler/
+│
 ├── backend/
 │   ├── src/
 │   │   ├── config/
+│   │   │   ├── database.ts
+│   │   │   ├── elasticsearch.ts
+│   │   │   └── redis.ts
+│   │   │
 │   │   ├── db/
+│   │   │   └── schema.sql
+│   │   │
 │   │   ├── middleware/
+│   │   │   └── auth.middleware.ts
+│   │   │
 │   │   ├── queues/
+│   │   │   ├── email.queue.ts
+│   │   │   ├── email.worker.ts
+│   │   │   └── test.queue.ts
+│   │   │
 │   │   ├── routes/
+│   │   │   ├── auth.routes.ts
+│   │   │   ├── email.routes.ts
+│   │   │   └── queue.dashboard.ts
+│   │   │
 │   │   ├── services/
+│   │   │   ├── email.search.ts
+│   │   │   ├── email.sender.ts
+│   │   │   ├── email.service.ts
+│   │   │   ├── rate.limiter.ts
+│   │   │   ├── slack.service.ts
+│   │   │   └── test.email.ts
+│   │   │
 │   │   └── server.ts
+│   │
 │   ├── package.json
 │   └── tsconfig.json
+│
 ├── frontend/
 │   ├── src/
+│   │   ├── api/
 │   │   ├── components/
 │   │   ├── pages/
 │   │   ├── services/
-│   │   └── types/
-│   └── package.json
+│   │   ├── types/
+│   │   ├── App.tsx
+│   │   └── main.tsx
+│   │
+│   ├── package.json
+│   └── vite.config.ts
+│
 ├── docker-compose.yml
 ├── .env.example
 ├── .gitignore
@@ -54,9 +100,18 @@ reachinbox-email-scheduler/
 
 ---
 
-# Getting Started
+# ⚙️ Prerequisites
 
-## 1. Start Infrastructure
+Make sure the following are installed:
+
+* Node.js 18+
+* npm
+* Docker Desktop
+* Git
+
+---
+
+# 🐳 1. Start Infrastructure
 
 From the project root:
 
@@ -64,7 +119,7 @@ From the project root:
 docker compose up -d
 ```
 
-This starts the required infrastructure services:
+This starts:
 
 * PostgreSQL
 * Redis
@@ -76,30 +131,269 @@ Check the containers:
 docker ps
 ```
 
+Expected services:
+
+```text
+reachinbox-postgres
+reachinbox-redis
+reachinbox-elasticsearch
+```
+
 ---
 
-# Backend Setup
+# 🗄️ 2. PostgreSQL
 
-Open a terminal in the project root:
+The application uses PostgreSQL for persistent application state.
+
+Default configuration:
+
+```text
+Database: reachinbox
+User: reachinbox
+Password: reachinbox_password
+Port: 5432
+```
+
+The schema is located at:
+
+```text
+backend/src/db/schema.sql
+```
+
+The PostgreSQL data is stored using a Docker volume, allowing database state to survive container restarts.
+
+To connect manually:
+
+```bash
+docker exec -it reachinbox-postgres psql -U reachinbox -d reachinbox
+```
+
+---
+
+# 🔴 3. Redis
+
+Redis is used by BullMQ as the persistent job queue and also backs the rate-limiting logic.
+
+Default configuration:
+
+```text
+Host: localhost
+Port: 6379
+```
+
+Redis persistence is enabled through the Docker configuration.
+
+BullMQ stores delayed jobs in Redis, meaning scheduled jobs are not dependent on the Node.js process remaining alive.
+
+---
+
+# 🔎 4. Elasticsearch
+
+Elasticsearch is used to index sent emails and provide searchable email data.
+
+Default configuration:
+
+```text
+ELASTICSEARCH_URL=http://localhost:9200
+```
+
+Sent emails are indexed after successful processing.
+
+The backend exposes an email search endpoint:
+
+```text
+GET /api/emails/search
+```
+
+---
+
+# 🔐 5. Environment Variables
+
+Create:
+
+```text
+backend/.env
+```
+
+Do **not** commit this file.
+
+Use the provided environment template:
+
+```text
+.env.example
+```
+
+From PowerShell while inside `backend`:
+
+```powershell
+Copy-Item ..\.env.example .env
+```
+
+Then configure the required values.
+
+Example:
+
+```env
+PORT=5000
+
+DATABASE_URL=postgresql://reachinbox:reachinbox_password@localhost:5432/reachinbox
+
+REDIS_HOST=localhost
+REDIS_PORT=6379
+
+ELASTICSEARCH_URL=http://localhost:9200
+
+WORKER_CONCURRENCY=5
+
+SMTP_HOST=smtp.ethereal.email
+SMTP_PORT=587
+SMTP_USER=<ETHEREAL_USER>
+SMTP_PASSWORD=<ETHEREAL_PASSWORD>
+SMTP_FROM="ReachInbox <your-ethereal-email>"
+
+MIN_EMAIL_DELAY_MS=2000
+MAX_EMAILS_PER_HOUR=200
+
+JWT_SECRET=<STRONG_RANDOM_SECRET>
+
+GOOGLE_CLIENT_ID=<GOOGLE_CLIENT_ID>
+GOOGLE_CLIENT_SECRET=<GOOGLE_CLIENT_SECRET>
+GOOGLE_CALLBACK_URL=http://localhost:5000/api/auth/google/callback
+
+FRONTEND_URL=http://localhost:5173
+
+SLACK_CLIENT_ID=<SLACK_CLIENT_ID>
+SLACK_CLIENT_SECRET=<SLACK_CLIENT_SECRET>
+SLACK_REDIRECT_URI=http://localhost:5000/api/slack/callback
+```
+
+Never commit real passwords, API keys, OAuth secrets, JWT secrets, or Slack tokens.
+
+---
+
+# 📧 6. Ethereal Email Setup
+
+Ethereal Email is used as the fake SMTP provider for testing email delivery.
+
+Create an Ethereal test account and obtain:
+
+* SMTP username
+* SMTP password
+* SMTP host
+* SMTP port
+
+Configure them in:
+
+```text
+backend/.env
+```
+
+Example:
+
+```env
+SMTP_HOST=smtp.ethereal.email
+SMTP_PORT=587
+SMTP_USER=<ETHEREAL_USER>
+SMTP_PASSWORD=<ETHEREAL_PASSWORD>
+SMTP_FROM="ReachInbox <ETHEREAL_EMAIL>"
+```
+
+Ethereal provides a web interface where sent test emails can be inspected.
+
+No real emails are sent to external recipients.
+
+---
+
+# 🔑 7. Google OAuth Setup
+
+Google login is implemented using Passport and Google OAuth 2.0.
+
+Create OAuth credentials in Google Cloud Console.
+
+Configure:
+
+```env
+GOOGLE_CLIENT_ID=<YOUR_CLIENT_ID>
+GOOGLE_CLIENT_SECRET=<YOUR_CLIENT_SECRET>
+GOOGLE_CALLBACK_URL=http://localhost:5000/api/auth/google/callback
+```
+
+The following callback URL must be registered in the Google OAuth application:
+
+```text
+http://localhost:5000/api/auth/google/callback
+```
+
+After successful authentication, the backend generates a JWT and redirects the user to the frontend dashboard.
+
+---
+
+# 💬 8. Slack OAuth Setup
+
+Slack integration uses a real Slack OAuth v2 authorization flow.
+
+The user can select:
+
+```text
+Connect Slack
+```
+
+from the dashboard.
+
+The flow is:
+
+```text
+Frontend
+   ↓
+Backend
+   ↓
+Slack OAuth Authorization
+   ↓
+Slack Callback
+   ↓
+Token Exchange
+   ↓
+PostgreSQL
+```
+
+The Slack connection is stored per authenticated user.
+
+Configure:
+
+```env
+SLACK_CLIENT_ID=<SLACK_CLIENT_ID>
+SLACK_CLIENT_SECRET=<SLACK_CLIENT_SECRET>
+SLACK_REDIRECT_URI=http://localhost:5000/api/slack/callback
+```
+
+The Slack application's redirect URL must contain:
+
+```text
+http://localhost:5000/api/slack/callback
+```
+
+Required scopes include:
+
+```text
+chat:write
+channels:read
+channels:join
+```
+
+If the Slack connection is removed, rate-limit processing continues normally without crashing.
+
+When the hourly rate limit is reached and Slack is connected, the backend sends a real Slack notification.
+
+---
+
+# 🖥️ 9. Run Backend
+
+From the project root:
 
 ```bash
 cd backend
 npm install
 ```
-
-Create the environment file:
-
-```bash
-copy ..\.env.example .env
-```
-
-For Git Bash/Linux/macOS:
-
-```bash
-cp ../.env.example .env
-```
-
-Update `backend/.env` with the required values.
 
 Build the backend:
 
@@ -107,32 +401,36 @@ Build the backend:
 npm run build
 ```
 
-Start the API server:
+Start the API:
 
 ```bash
 npm run dev
 ```
 
-The backend runs on the configured port, normally:
+The backend runs on:
 
 ```text
 http://localhost:5000
 ```
 
-## Start BullMQ Worker
+---
 
-Open a second terminal:
+# 👷 10. Start BullMQ Worker
+
+The worker must run separately from the API server.
+
+Open another terminal:
 
 ```bash
 cd backend
 npm run worker
 ```
 
-The API server and BullMQ worker should run simultaneously.
+The worker consumes scheduled jobs from BullMQ and processes emails.
 
 ---
 
-# Frontend Setup
+# 🎨 11. Run Frontend
 
 Open another terminal:
 
@@ -142,309 +440,314 @@ npm install
 npm run dev
 ```
 
-The frontend normally runs at:
+The frontend runs on:
 
 ```text
 http://localhost:5173
 ```
 
----
-
-# Environment Variables
-
-The root `.env.example` contains the environment variables required by the application.
-
-The main configuration categories are:
-
-### Database
-
-```env
-DATABASE_URL=...
-```
-
-### Redis
-
-```env
-REDIS_URL=...
-```
-
-### Elasticsearch
-
-```env
-ELASTICSEARCH_URL=...
-```
-
-### JWT
-
-```env
-JWT_SECRET=...
-```
-
-### Google OAuth
-
-```env
-GOOGLE_CLIENT_ID=...
-GOOGLE_CLIENT_SECRET=...
-GOOGLE_CALLBACK_URL=...
-```
-
-Configure the Google OAuth callback URL to match:
-
-```text
-http://localhost:5000/api/auth/google/callback
-```
-
-### Ethereal Email
-
-Create an account at Ethereal Email and configure the SMTP credentials in `backend/.env`.
-
-Example:
-
-```env
-SMTP_HOST=smtp.ethereal.email
-SMTP_PORT=587
-SMTP_USER=your_ethereal_username
-SMTP_PASS=your_ethereal_password
-```
-
-Ethereal provides a fake SMTP environment for testing without sending real emails to recipients.
-
-### Slack
-
-Configure the Slack OAuth application and add the callback URL configured by:
-
-```env
-SLACK_REDIRECT_URI=http://localhost:5000/api/slack/callback
-```
-
-Required Slack scopes include:
-
-```text
-chat:write
-channels:read
-groups:read
-```
-
-The Slack connection is stored per authenticated user in PostgreSQL.
-
-### Scheduler Configuration
-
-The scheduler configuration is controlled through environment variables, including:
-
-```env
-WORKER_CONCURRENCY=...
-MAX_EMAILS_PER_HOUR_PER_SENDER=...
-MIN_EMAIL_DELAY_MS=...
-```
-
-The exact values can be adjusted according to the desired test scenario.
+Open the displayed Vite URL in the browser.
 
 ---
 
-# Architecture
+# 🧠 Scheduler Architecture
 
-## Email Scheduling
+The scheduler uses PostgreSQL + BullMQ + Redis.
 
-The scheduling flow is:
+The basic flow is:
 
 ```text
-Frontend
-   ↓
-Express API
-   ↓
-PostgreSQL
-   ↓
-BullMQ delayed job
-   ↓
+User
+ │
+ ▼
+React Dashboard
+ │
+ ▼
+Schedule Email API
+ │
+ ├──────────────► PostgreSQL
+ │                 │
+ │                 └── Email state
+ │
+ ▼
+BullMQ
+ │
+ ▼
 Redis
-   ↓
-BullMQ Worker
-   ↓
-Rate Limiter
-   ↓
+ │
+ │ delayed until scheduled time
+ ▼
+Email Worker
+ │
+ ├── Idempotency check
+ │
+ ├── Rate-limit check
+ │
+ ├── Minimum delay check
+ │
+ └── SMTP send
+ │
+ ▼
 Ethereal SMTP
-   ↓
-PostgreSQL + Elasticsearch
+ │
+ ▼
+PostgreSQL status update
+ │
+ ▼
+Elasticsearch indexing
 ```
+
+---
+
+# ⏰ Scheduling
+
+The application does **not** use cron jobs.
+
+There is no:
+
+```text
+node-cron
+cron
+crontab
+agenda
+```
+
+Instead, scheduled emails are represented as BullMQ delayed jobs.
 
 When an email is scheduled:
 
-1. The API validates the request.
-2. The email is stored in PostgreSQL.
-3. A BullMQ delayed job is created.
-4. Redis persists the queue state.
-5. When the scheduled time is reached, the worker processes the job.
-6. The worker atomically claims the email before sending.
-7. The rate limiter determines whether the sender can send.
-8. If allowed, the email is sent through Ethereal SMTP.
-9. The email status is updated in PostgreSQL.
-10. The sent email is indexed into Elasticsearch.
+1. The email is stored in PostgreSQL.
+2. A BullMQ delayed job is created.
+3. Redis persists the delayed job.
+4. BullMQ waits until the scheduled execution time.
+5. The worker picks up the job.
+6. The worker processes the email.
+7. PostgreSQL is updated with the final state.
 
-No cron jobs are used.
+This allows scheduling to work without continuously polling the database.
 
 ---
 
-# Persistence and Restart Recovery
+# 🔄 Persistence After Restart
 
-The application uses PostgreSQL and Redis as persistent infrastructure.
+The scheduler is designed to survive application restarts.
 
-Future scheduled emails are represented by:
+Scheduled jobs are stored in Redis through BullMQ.
 
-* PostgreSQL records
-* BullMQ delayed jobs stored in Redis
+Application email state is stored in PostgreSQL.
 
-Because scheduling is handled by BullMQ rather than an in-memory timer or cron process, restarting the backend does not require rebuilding the schedule from scratch.
-
-The worker resumes processing persistent BullMQ jobs after restart.
-
-Before sending an email, the worker atomically transitions the email from:
+Therefore:
 
 ```text
-scheduled → processing
+Schedule email
+      ↓
+PostgreSQL
+      +
+BullMQ / Redis
+      ↓
+Server stops
+      ↓
+Server starts again
+      ↓
+Worker reconnects
+      ↓
+Pending BullMQ jobs continue
 ```
 
-This prevents multiple workers from sending the same email concurrently.
+Future scheduled emails do not need to be recreated manually.
 
-After successful delivery:
+PostgreSQL and Redis Docker volumes provide persistent storage across container restarts.
+
+---
+
+# 🛡️ Idempotency / Duplicate Prevention
+
+The worker does not blindly send every job it receives.
+
+Before sending an email, the application checks and atomically transitions the email state.
+
+Typical lifecycle:
 
 ```text
-processing → sent
+scheduled
+    ↓
+processing
+    ↓
+sent
 ```
 
-If delivery fails:
+If an email has already been processed, the worker does not send it again.
+
+This protects against duplicate sends when multiple workers are processing jobs or when a job is retried.
+
+---
+
+# 🚦 Rate Limiting
+
+The current configuration uses:
+
+```env
+MAX_EMAILS_PER_HOUR=200
+```
+
+This means a sender can send up to 200 emails within the configured hourly window.
+
+The rate-limiting logic uses Redis-backed state rather than relying only on an in-memory counter.
+
+This is important because multiple worker processes can share the same Redis-backed rate limit.
+
+---
+
+# ⏱️ Minimum Delay Between Emails
+
+The configured minimum delay is:
+
+```env
+MIN_EMAIL_DELAY_MS=2000
+```
+
+Therefore:
 
 ```text
-processing → failed
+2 seconds minimum delay
 ```
 
-This provides idempotency protection and prevents duplicate sends during normal concurrent processing.
+is maintained between email sends.
+
+This simulates provider throttling and prevents the worker from sending all emails simultaneously.
+
+The value can be changed through the environment configuration.
+
+For example:
+
+```env
+MIN_EMAIL_DELAY_MS=5000
+```
+
+would enforce a 5-second minimum delay.
 
 ---
 
-# Worker Concurrency
+# 📊 Worker Concurrency
 
-BullMQ worker concurrency is configurable through:
+Worker concurrency is configurable through:
 
 ```env
-WORKER_CONCURRENCY
+WORKER_CONCURRENCY=5
 ```
 
-Multiple email jobs can therefore be processed in parallel while the database state transition and Redis-backed rate limiting protect against duplicate or excessive sends.
+The worker can process up to five jobs concurrently.
 
-The design can handle large batches of scheduled emails without creating one long-running process per email.
+The concurrency value is configurable rather than hardcoded.
+
+Example:
+
+```env
+WORKER_CONCURRENCY=10
+```
+
+would allow up to ten concurrent jobs.
+
+Database state transitions and Redis-backed rate limiting ensure that concurrent processing does not result in duplicate sends.
 
 ---
 
-# Minimum Delay Between Emails
+# 🧮 Behavior Under Heavy Load
 
-A configurable minimum delay is enforced between email sends.
-
-Configuration:
-
-```env
-MIN_EMAIL_DELAY_MS
-```
-
-This is implemented using the Redis-backed rate-limit/send-slot mechanism so that the delay is not dependent only on a single worker's in-memory state.
-
-This helps simulate provider throttling behavior.
-
----
-
-# Hourly Rate Limiting
-
-The application supports a configurable per-sender hourly limit.
-
-Configuration:
-
-```env
-MAX_EMAILS_PER_HOUR_PER_SENDER
-```
-
-Rate-limit state is stored in Redis using sender and hourly-window keys.
-
-This makes the rate limit safe when multiple worker processes or instances are running.
+The system is designed to handle situations where 1000+ emails are scheduled around the same time.
 
 Example:
 
 ```text
-Sender A
-   ↓
-Hourly limit = N
-   ↓
-Redis counter
-   ↓
-Allow / Reschedule
+1000 scheduled emails
+        ↓
+BullMQ / Redis
+        ↓
+5 concurrent workers
+        ↓
+Rate limiter
+        ↓
+Maximum 200/hour
+        ↓
+Remaining jobs rescheduled
 ```
 
-When the hourly limit is reached:
+The application does not attempt to send all 1000 emails immediately.
 
-1. The email is not permanently failed.
-2. The email remains scheduled.
-3. The worker calculates the next available hour.
-4. A new BullMQ delayed job is created.
-5. Processing continues when the next hour begins.
+Instead:
 
-This preserves scheduled emails rather than dropping them.
+* BullMQ manages the workload.
+* Worker concurrency controls parallel processing.
+* Minimum send delay prevents rapid bursts.
+* Redis-backed hourly limits control throughput.
+* Jobs that exceed the hourly limit are rescheduled.
+* Emails are not permanently dropped because the rate limit was reached.
 
 ---
 
-# Slack Rate-limit Notifications
+# 🔔 Slack Rate-Limit Notification
 
-Slack integration uses a real Slack OAuth v2 flow.
-
-The flow is:
+When the configured hourly limit is reached:
 
 ```text
-Dashboard
-   ↓
-Connect Slack
-   ↓
-Slack OAuth
-   ↓
-OAuth Callback
-   ↓
-Store Slack connection in PostgreSQL
-   ↓
-Rate Limit Hit
-   ↓
-Redis notification guard
-   ↓
-Slack chat.postMessage
+Rate limit reached
+       ↓
+Redis rate limiter
+       ↓
+Slack connection lookup
+       ↓
+Slack API
+       ↓
+Notification sent
 ```
 
-When a sender reaches the hourly limit, the system sends a real Slack notification containing information about the rate-limit event.
+The Slack notification is an actual API request rather than only a console log.
 
-Notifications are guarded by Redis so that the same sender is not repeatedly notified during the same hourly window.
+If Slack is not connected:
 
-If Slack is not connected, rate-limit processing continues normally without crashing the worker.
+```text
+Rate limit reached
+       ↓
+No Slack connection
+       ↓
+Continue normally
+```
+
+The email job remains scheduled/rescheduled and the application does not crash.
 
 ---
 
-# Elasticsearch Search
+# 🔍 Elasticsearch Search
 
-Sent emails are indexed into Elasticsearch.
+Sent emails are indexed in Elasticsearch.
 
-The search endpoint is:
+This provides searchable email data independently of the primary PostgreSQL state.
+
+The application exposes:
 
 ```text
 GET /api/emails/search
 ```
 
-This allows sent/scheduled email data to be searched efficiently rather than relying only on database filtering.
+This can be used to search indexed email records.
 
-The application includes Elasticsearch configuration and indexing logic in:
+The architecture is:
 
 ```text
-backend/src/config/elasticsearch.ts
-backend/src/services/email.search.ts
+Email successfully sent
+        ↓
+PostgreSQL status = sent
+        ↓
+Elasticsearch indexing
+        ↓
+Search API
 ```
 
 ---
 
-# Bull Board
+# 📋 Bull Board
 
-Bull Board provides live queue visibility.
+Bull Board is included for live queue visibility.
 
 Queue dashboard:
 
@@ -452,31 +755,41 @@ Queue dashboard:
 http://localhost:5000/admin/queues
 ```
 
-It can be used to inspect:
+It allows developers/reviewers to inspect BullMQ queues and monitor job states.
 
-* Waiting jobs
-* Delayed jobs
-* Active jobs
-* Completed jobs
-* Failed jobs
+Useful states include:
 
-This is useful for monitoring scheduled email processing.
+* Waiting
+* Delayed
+* Active
+* Completed
+* Failed
+
+This makes the scheduling behavior easier to demonstrate.
 
 ---
 
-# Frontend Features
+# 🖥️ Frontend Features
 
 ## Google Login
 
-The application implements real Google OAuth authentication.
+The frontend supports real Google OAuth.
 
 After successful authentication:
 
-* The user is redirected to the dashboard.
-* User name is displayed.
-* User email is displayed.
-* User avatar is displayed.
-* Logout is available.
+```text
+Google
+  ↓
+Backend OAuth callback
+  ↓
+JWT
+  ↓
+Frontend
+  ↓
+Dashboard
+```
+
+The header displays authenticated user information.
 
 ---
 
@@ -494,44 +807,51 @@ The dashboard provides access to:
 
 ---
 
-## Compose Email
+## Compose New Email
 
-Users can:
+Users can compose an email with:
 
-* Enter email subject
-* Enter email body
-* Upload a CSV/text file containing email leads
-* Detect email addresses from the uploaded file
-* Configure start time
-* Configure delay between emails
-* Configure hourly sending limit
-* Schedule the emails
+* Subject
+* Body
+* CSV/text lead upload
+* Start time
+* Delay between emails
+* Hourly limit
+
+The uploaded file is parsed to detect email addresses.
+
+The UI displays the number of detected addresses before scheduling.
 
 ---
 
-## Scheduled Emails
+# 📅 Scheduled Emails
 
-The scheduled email view displays:
+The scheduled email page displays:
 
 * Recipient
 * Subject
 * Scheduled time
 * Status
 
-Loading and empty states are handled in the UI.
+The UI includes:
+
+* Loading states
+* Empty states
+* Status indicators
+* Email information
 
 ---
 
-## Sent Emails
+# 📤 Sent Emails
 
-The sent email view displays:
+The sent email page displays:
 
 * Recipient
 * Subject
 * Sent time
 * Status
 
-Supported statuses include:
+Possible statuses include:
 
 ```text
 sent
@@ -540,203 +860,468 @@ failed
 
 ---
 
-# Behavior Under Load
+# ❌ Failed Emails
 
-The system is designed to handle large batches such as 1000+ emails scheduled around the same time.
-
-BullMQ manages the jobs persistently in Redis while configurable worker concurrency controls parallel processing.
-
-When the hourly sender limit is reached, additional jobs are not dropped. They are rescheduled for the next available hour.
-
-The combination of:
-
-* BullMQ delayed jobs
-* Redis-backed rate limiting
-* Worker concurrency
-* PostgreSQL state transitions
-* Idempotency checks
-
-allows the system to process large scheduled batches without relying on cron jobs or in-memory scheduling.
+Failed emails can be viewed separately so that unsuccessful deliveries can be inspected.
 
 ---
 
-# API / Queue Components
+# 📄 Email Details
 
-Important backend components include:
-
-```text
-backend/src/queues/email.queue.ts
-backend/src/queues/email.worker.ts
-backend/src/services/email.service.ts
-backend/src/services/email.sender.ts
-backend/src/services/rate.limiter.ts
-backend/src/services/slack.service.ts
-backend/src/services/email.search.ts
-backend/src/routes/email.routes.ts
-backend/src/routes/auth.routes.ts
-backend/src/routes/queue.dashboard.ts
-```
+The application provides an email details page for viewing individual email information.
 
 ---
 
-# Features Implemented
+# 💬 Slack Connection
 
-## Backend
+Users can connect their Slack workspace from the dashboard.
 
-* [x] Express.js API
-* [x] TypeScript
-* [x] PostgreSQL persistence
-* [x] BullMQ
-* [x] Redis
-* [x] Delayed email scheduling
-* [x] Persistent scheduled jobs
-* [x] Worker concurrency
-* [x] Minimum delay between sends
-* [x] Per-sender hourly rate limiting
-* [x] Rate-limit rescheduling
-* [x] Idempotency protection
-* [x] Ethereal SMTP
-* [x] Elasticsearch indexing/search
-* [x] Bull Board queue dashboard
-* [x] Google OAuth
-* [x] Slack OAuth
-* [x] Live Slack rate-limit notification
-* [x] Slack disconnect/reconnect handling
+The connection is associated with the authenticated user and persisted in PostgreSQL.
 
-## Frontend
+The dashboard can also show whether Slack is connected.
 
-* [x] React + TypeScript
-* [x] Google login
-* [x] Dashboard
-* [x] User profile information
-* [x] Logout
-* [x] Compose email
-* [x] CSV/text lead upload
-* [x] Email detection
-* [x] Scheduling configuration
-* [x] Scheduled emails view
-* [x] Sent emails view
-* [x] Failed emails view
-* [x] Email details
-* [x] Loading states
-* [x] Empty states
-* [x] Basic error handling
+Users can disconnect Slack and reconnect later without requiring a server redeployment.
 
 ---
 
-# Demo Video
+# 🔐 Security
 
-The demonstration video covers the following:
+Sensitive configuration is stored in environment variables.
 
-1. Google login
-2. Dashboard overview
-3. Compose and schedule emails
-4. CSV lead upload
-5. Scheduled emails
-6. Sent emails
-7. Slack rate-limit notification
-8. Bull Board queue monitoring
-9. Backend restart scenario
-10. Verification that future scheduled emails remain persistent after restart
-
-The demo video is kept within the required 5-minute limit.
-
----
-
-# Restart Test
-
-To verify persistence:
-
-1. Schedule an email for a future time.
-2. Stop the backend server.
-3. Keep PostgreSQL and Redis running.
-4. Start the backend and worker again.
-5. Verify that the future BullMQ job remains available.
-6. Verify that the email is processed at the scheduled time.
-
-No cron job or in-memory timer is required.
-
----
-
-# Security
-
-Environment files containing secrets are intentionally excluded from Git.
-
-Never commit:
+The repository intentionally excludes:
 
 ```text
 .env
-backend/.env
-frontend/.env
 ```
 
-Use:
+Build directories:
 
 ```text
-.env.example
+dist/
 ```
 
-for documenting required environment variables.
+and dependency directories:
 
-OAuth secrets, SMTP credentials, JWT secrets, and Slack tokens must only exist in local environment files.
+```text
+node_modules/
+```
+
+are also excluded from Git.
+
+The root `.gitignore` prevents accidental commits of backend credentials.
+
+Never commit:
+
+* SMTP passwords
+* Google OAuth secrets
+* Slack secrets
+* Slack bot tokens
+* JWT secrets
+* Database passwords
 
 ---
 
-# Assumptions, Shortcuts and Trade-offs
+# 🧪 Useful Development Commands
 
-* Ethereal Email is used because the assignment requires a fake SMTP provider.
-* Redis is used for distributed rate-limit state so that multiple workers can safely share sending limits.
-* PostgreSQL remains the source of truth for email state.
-* BullMQ/Redis is responsible for delayed job execution.
-* The implementation prioritizes reliable scheduling and idempotency over provider-specific production delivery guarantees.
-* Elasticsearch is used as a search/indexing layer rather than the primary source of truth.
-* Slack notifications are optional and only occur when the authenticated user has connected Slack.
-* The system is designed to demonstrate production-oriented scheduling patterns while keeping infrastructure suitable for local development.
+### Build backend
 
----
+```bash
+cd backend
+npm run build
+```
 
-# Running the Complete System
+### Start backend
 
-Use three terminals.
+```bash
+npm run dev
+```
 
-### Terminal 1 — Infrastructure
+### Start worker
+
+```bash
+npm run worker
+```
+
+### Start frontend
+
+```bash
+cd frontend
+npm run dev
+```
+
+### Start infrastructure
 
 ```bash
 docker compose up -d
 ```
 
-### Terminal 2 — Backend API
+### Stop infrastructure
 
 ```bash
-cd backend
-npm install
-npm run build
-npm run dev
+docker compose down
 ```
 
-### Terminal 3 — BullMQ Worker
+### View Docker containers
 
 ```bash
-cd backend
-npm run worker
+docker ps
 ```
 
-### Terminal 4 — Frontend
+### View PostgreSQL data
 
 ```bash
-cd frontend
-npm install
-npm run dev
+docker exec -it reachinbox-postgres psql -U reachinbox -d reachinbox
 ```
 
-Then open:
+---
+
+# 🧪 Manual PostgreSQL Verification
+
+To check Slack connections:
+
+```bash
+docker exec -it reachinbox-postgres psql -U reachinbox -d reachinbox -c "SELECT user_id, slack_team_id, slack_team_name, slack_channel_id, connected_at FROM slack_connections;"
+```
+
+To verify emails:
+
+```bash
+docker exec -it reachinbox-postgres psql -U reachinbox -d reachinbox -c "SELECT id, recipient, subject, status, scheduled_at, sent_at FROM emails ORDER BY created_at DESC;"
+```
+
+---
+
+# 📌 Implemented Requirements
+
+## Backend
+
+| Requirement                   | Status |
+| ----------------------------- | ------ |
+| TypeScript                    | ✅      |
+| Express.js                    | ✅      |
+| PostgreSQL                    | ✅      |
+| Redis                         | ✅      |
+| BullMQ                        | ✅      |
+| Delayed jobs                  | ✅      |
+| No cron jobs                  | ✅      |
+| Persistent scheduling         | ✅      |
+| Restart recovery              | ✅      |
+| Idempotency                   | ✅      |
+| Worker concurrency            | ✅      |
+| Configurable concurrency      | ✅      |
+| Minimum email delay           | ✅      |
+| Hourly rate limiting          | ✅      |
+| Redis-backed rate limiting    | ✅      |
+| Rate-limit rescheduling       | ✅      |
+| Slack rate-limit notification | ✅      |
+| Slack OAuth                   | ✅      |
+| Slack disconnect/reconnect    | ✅      |
+| Ethereal SMTP                 | ✅      |
+| Elasticsearch indexing        | ✅      |
+| Elasticsearch search          | ✅      |
+| Bull Board                    | ✅      |
+
+## Frontend
+
+| Requirement         | Status |
+| ------------------- | ------ |
+| React               | ✅      |
+| TypeScript          | ✅      |
+| Google OAuth        | ✅      |
+| Login               | ✅      |
+| Logout              | ✅      |
+| User information    | ✅      |
+| Dashboard           | ✅      |
+| Compose email       | ✅      |
+| CSV lead upload     | ✅      |
+| Email detection     | ✅      |
+| Scheduled emails    | ✅      |
+| Sent emails         | ✅      |
+| Failed emails       | ✅      |
+| Email details       | ✅      |
+| Loading states      | ✅      |
+| Empty states        | ✅      |
+| Slack connection UI | ✅      |
+| Error handling      | ✅      |
+
+---
+
+# 🏗️ Architecture Summary
+
+The application separates responsibilities across multiple services:
 
 ```text
-http://localhost:5173
+                    ┌──────────────────┐
+                    │   React Client   │
+                    └────────┬─────────┘
+                             │
+                             ▼
+                    ┌──────────────────┐
+                    │ Express API      │
+                    │ TypeScript       │
+                    └───────┬──────────┘
+                            │
+              ┌─────────────┼──────────────┐
+              │             │              │
+              ▼             ▼              ▼
+        PostgreSQL       BullMQ         Elasticsearch
+              │             │
+              │             ▼
+              │           Redis
+              │             │
+              │             ▼
+              │       Email Worker
+              │             │
+              │             ▼
+              │       Rate Limiter
+              │             │
+              │             ▼
+              │       Ethereal SMTP
+              │
+              └─────────────┐
+                            ▼
+                       Slack API
 ```
 
-Bull Board:
+---
+
+# 🔄 End-to-End Email Flow
+
+```text
+1. User logs in
+        ↓
+2. User opens Compose
+        ↓
+3. Uploads CSV/text leads
+        ↓
+4. Application detects email addresses
+        ↓
+5. User configures:
+      - Start time
+      - Delay
+      - Hourly limit
+        ↓
+6. API stores emails in PostgreSQL
+        ↓
+7. BullMQ delayed jobs are created
+        ↓
+8. Redis persists queue state
+        ↓
+9. Worker picks jobs at scheduled time
+        ↓
+10. Idempotency check
+        ↓
+11. Rate-limit check
+        ↓
+12. Minimum-delay check
+        ↓
+13. Email sent through Ethereal
+        ↓
+14. PostgreSQL updated
+        ↓
+15. Email indexed in Elasticsearch
+        ↓
+16. Dashboard displays final status
+```
+
+---
+
+# 🔁 Restart Demonstration
+
+The scheduler is designed so that future jobs survive a backend restart.
+
+Demo flow:
+
+```text
+1. Schedule an email for a future time.
+
+2. Confirm the job appears in Bull Board
+   as a delayed job.
+
+3. Stop the backend server.
+
+4. Leave Redis and PostgreSQL running.
+
+5. Start the backend and worker again.
+
+6. BullMQ reconnects to Redis.
+
+7. The delayed job remains available.
+
+8. At the scheduled time, the worker processes it.
+
+9. Email status changes to sent.
+```
+
+This demonstrates that scheduling does not depend on an in-memory timer.
+
+---
+
+# ⚖️ Assumptions, Shortcuts & Trade-offs
+
+### Ethereal instead of real SMTP
+
+Ethereal is intentionally used because the assignment requires a fake SMTP provider.
+
+This allows email sending to be demonstrated safely without delivering real emails.
+
+### PostgreSQL + Redis
+
+PostgreSQL is the source of truth for application email state, while Redis/BullMQ manages asynchronous scheduling.
+
+This separation allows the queue to scale independently from relational state.
+
+### Configurable limits
+
+Concurrency, minimum delay, and hourly limits are configured through environment variables instead of being hardcoded.
+
+Current development configuration:
+
+```text
+Worker concurrency: 5
+Minimum delay: 2 seconds
+Hourly limit: 200 emails
+```
+
+### Rate-limit rescheduling
+
+When the hourly limit is reached, jobs are not discarded.
+
+They are rescheduled for a future available window.
+
+This prioritizes reliability over immediate delivery.
+
+### Local development
+
+The project is configured for local development using Docker for infrastructure.
+
+Production deployment would additionally require:
+
+* TLS
+* Secret management
+* Production SMTP
+* Managed PostgreSQL
+* Managed Redis
+* Elasticsearch authentication
+* HTTPS OAuth callback URLs
+* Monitoring and alerting
+
+---
+
+# 🎥 Demo Video
+
+The recommended demo should be under 5 minutes.
+
+Suggested flow:
+
+### 1. Login
+
+Show:
+
+* Google login
+* Dashboard
+* User information
+
+### 2. Compose
+
+Show:
+
+* Subject
+* Body
+* CSV upload
+* Detected email count
+* Start time
+* Delay
+* Hourly limit
+
+### 3. Schedule
+
+Click:
+
+```text
+Schedule
+```
+
+Show the scheduled emails in the dashboard.
+
+### 4. Bull Board
+
+Open:
 
 ```text
 http://localhost:5000/admin/queues
 ```
+
+Show the delayed BullMQ jobs.
+
+### 5. Sent Emails
+
+Wait for the scheduled time and show the email moving to:
+
+```text
+Sent
+```
+
+### 6. Restart Test
+
+Schedule another future email.
+
+Stop the backend.
+
+Start it again.
+
+Show that the future job remains scheduled and is eventually processed.
+
+### 7. Slack
+
+Connect Slack and trigger the hourly rate limit.
+
+Show the actual Slack notification.
+
+---
+
+# 📦 Submission Checklist
+
+Before submitting:
+
+* [ ] Private GitHub repository created
+* [ ] Backend committed
+* [ ] Frontend committed
+* [ ] Docker Compose committed
+* [ ] README committed
+* [ ] `.env` excluded from Git
+* [ ] `node_modules` excluded
+* [ ] Build output excluded
+* [ ] Google OAuth configured
+* [ ] Slack OAuth configured
+* [ ] Ethereal configured
+* [ ] PostgreSQL running
+* [ ] Redis running
+* [ ] Elasticsearch running
+* [ ] BullMQ worker running
+* [ ] Bull Board accessible
+* [ ] Scheduled email tested
+* [ ] Sent email tested
+* [ ] Restart scenario tested
+* [ ] Slack notification tested
+* [ ] Demo video recorded
+* [ ] Repository access granted to the required reviewer
+* [ ] Submission form completed
+
+---
+
+# 👨‍💻 Repository
+
+Repository:
+
+```text
+https://github.com/jaswanth42/reachinbox-email-scheduler
+```
+
+The repository contains the complete backend, frontend, infrastructure configuration, and documentation required for the ReachInbox assignment.
+
+---
+
+# 📄 License
+
+This project was created as a technical assignment for ReachInbox / Outbox Labs.
