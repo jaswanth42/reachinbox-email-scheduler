@@ -1,25 +1,65 @@
 import { useEffect } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
 
 function GoogleCallback() {
-  const location = useLocation();
-  const navigate = useNavigate();
-
   useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const token = params.get("token");
+    const params = new URLSearchParams(
+      window.location.search
+    );
 
+    const token = params.get("token");
+    const userParam = params.get("user");
+
+    /*
+     * Token is required.
+     */
     if (!token) {
-      console.error("Google login: token not found");
-      navigate("/login", { replace: true });
+      console.error(
+        "Google login: token not found"
+      );
+
+      window.location.replace(
+        "/login?error=google_auth_failed"
+      );
+
       return;
     }
 
-    localStorage.setItem("token", token);
+    /*
+     * Store JWT.
+     */
+    localStorage.setItem(
+      "token",
+      token
+    );
 
-    // Go to dashboard
-    navigate("/", { replace: true });
-  }, [location.search, navigate]);
+    /*
+     * Store Google user profile.
+     */
+    if (userParam) {
+      try {
+        const user = JSON.parse(
+          userParam
+        );
+
+        localStorage.setItem(
+          "user",
+          JSON.stringify(user)
+        );
+      } catch (error) {
+        console.error(
+          "Google login: failed to parse user data",
+          error
+        );
+      }
+    }
+
+    /*
+     * Use a full page navigation so App.tsx
+     * re-reads the newly stored token/user from
+     * localStorage.
+     */
+    window.location.replace("/");
+  }, []);
 
   return (
     <div className="auth-page">
@@ -41,3 +81,4 @@ function GoogleCallback() {
 }
 
 export default GoogleCallback;
+

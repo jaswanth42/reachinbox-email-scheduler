@@ -580,6 +580,7 @@ router.get(
   }
 );
 
+
 /*
  * =========================
  * GOOGLE CALLBACK
@@ -604,18 +605,44 @@ router.get(
         created_at?: string;
       };
 
+      /*
+       * Create JWT for the authenticated user.
+       */
       const token = createToken({
         id: user.id,
         email: user.email,
       });
 
+      /*
+       * Send the user profile to the frontend as well.
+       *
+       * This is needed because the frontend header displays:
+       * - Name
+       * - Email
+       * - Avatar
+       */
+      const userData = {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        avatar_url: user.avatar_url || null,
+        created_at: user.created_at || null,
+      };
+
       const frontendUrl =
         process.env.FRONTEND_URL ||
         "http://localhost:5173";
 
-      res.redirect(
+      /*
+       * Redirect to the frontend callback with:
+       * - JWT token
+       * - User profile
+       */
+      return res.redirect(
         `${frontendUrl}/auth/callback?token=${encodeURIComponent(
           token
+        )}&user=${encodeURIComponent(
+          JSON.stringify(userData)
         )}`
       );
     } catch (error) {
@@ -624,12 +651,14 @@ router.get(
         error
       );
 
-      res.redirect(
+      return res.redirect(
         "http://localhost:5173/login?error=google_auth_failed"
       );
     }
   }
 );
+
+
 
 /*
  * =========================
