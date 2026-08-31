@@ -2,21 +2,14 @@ import pool from "../config/database.js";
 import { emailQueue } from "../queues/email.queue.js";
 
 interface ScheduleEmailInput {
-  senderId: string; // users.id from JWT
+  senderId: string;
   fromEmail?: string;
-
-  // New Compose supports multiple recipients
   recipients: string[];
-
   subject: string;
   body: string;
   scheduledAt: Date;
-
-  // Compose settings
   delayBetweenEmails?: number;
   hourlyLimit?: number;
-
-  // Attachment metadata for now
   attachments?: unknown[];
 }
 
@@ -59,16 +52,32 @@ export async function scheduleEmail({
     throw new Error("Message body is required");
   }
 
+  if (!(scheduledAt instanceof Date) || Number.isNaN(scheduledAt.getTime())) {
+    throw new Error("Invalid scheduledAt");
+  }
+
+  if (scheduledAt.getTime() <= Date.now()) {
+    throw new Error("scheduledAt must be in the future");
+  }
+
+  const parsedDelay = Number(delayBetweenEmails) || 0;
+  const parsedHourlyLimit = Number(hourlyLimit) || 0;
+
+  if (parsedDelay < 0) {
+    throw new Error("delayBetweenEmails cannot be negative");
+  }
+
+  if (parsedHourlyLimit < 0) {
+    throw new Error("hourlyLimit cannot be negative");
+  }
+
   // --------------------------------------------------
-  // 2. Get logged-in user's details
+  // 2. Verify logged-in user
   // --------------------------------------------------
 
   const userResult = await pool.query(
     `
-    SELECT
-      id,
-      email,
-      name
+    SELECT id, email, name
     FROM users
     WHERE id = $1
     LIMIT 1
@@ -83,24 +92,17 @@ export async function scheduleEmail({
   const user = userResult.rows[0];
 
   // --------------------------------------------------
-  // 3. Resolve sender
+  // 3. Resolve sender belonging to this user
   // --------------------------------------------------
 
-  const requestedSenderEmail =
-    fromEmail?.trim().toLowerCase();
+  const requestedSenderEmail = fromEmail?.trim().toLowerCase();
 
   let senderResult;
 
   if (requestedSenderEmail) {
-    // Never allow a user to send from a sender that does not
-    // belong to their account.
     senderResult = await pool.query(
       `
-      SELECT
-        id,
-        user_id,
-        email,
-        display_name
+      SELECT id, user_id, email, display_name
       FROM senders
       WHERE user_id = $1
         AND LOWER(email) = $2
@@ -113,14 +115,9 @@ export async function scheduleEmail({
       throw new Error("Selected sender is not available for this account");
     }
   } else {
-    // Existing accounts are guaranteed to have a sender by auth flows.
     senderResult = await pool.query(
       `
-      SELECT
-        id,
-        user_id,
-        email,
-        display_name
+      SELECT id, user_id, email, display_name
       FROM senders
       WHERE user_id = $1
       ORDER BY created_at ASC
@@ -144,72 +141,61 @@ export async function scheduleEmail({
 
   for (const recipientEmail of cleanedRecipients) {
     const result = await pool.query(
-  `
-  INSERT INTO emails (
-    sender_id,
-    recipient_email,
-    subject,
-    body,
-    scheduled_at,
-    status,
-    attachments
-  )
-  VALUES (
-    $1,
-    $2,
-    $3,
-    $4,
-    $5,
-    'scheduled',
-    $6
-  )
-  RETURNING *
-  `,
-  [
-    sender.id,
-    recipientEmail,
-    subject.trim(),
-    body.trim(),
-    scheduledAt,
-    JSON.stringify(attachments),
-  ]
-);
+      `
+      INSERT INTO emails (
+        sender_id,
+        recipient_email,
+        subject,
+        body,
+        scheduled_at,
+        status,
+        attachments
+      )
+      VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        'scheduled',
+        $6
+      )
+      RETURNING *
+      `,
+      [
+        sender.id,
+        recipientEmail,
+        subject.trim(),
+        body.trim(),
+        scheduledAt,
+        JSON.stringify(attachments),
+      ]
+    );
 
     const email = result.rows[0];
 
     // --------------------------------------------------
-    // 5. Add email to BullMQ
+    // 5. Create BullMQ delayed job
     // --------------------------------------------------
 
-    const delay = Math.max(
-      0,
-      scheduledAt.getTime() - Date.now()
-    );
+    const delay = Math.max(0, scheduledAt.getTime() - Date.now());
 
     const job = await emailQueue.add(
       "send-email",
       {
         emailId: email.id,
-
-        // Keep Compose settings available to worker
-        delayBetweenEmails,
-        hourlyLimit,
-
-        // Metadata only for now
+        delayBetweenEmails: parsedDelay,
+        hourlyLimit: parsedHourlyLimit,
         attachments,
       },
       {
         delay,
-
         jobId: `email-${email.id}`,
-
         attempts: 3,
-
         backoff: {
           type: "exponential",
           delay: 5000,
         },
-
         removeOnComplete: false,
         removeOnFail: false,
       }
@@ -222,58 +208,46 @@ export async function scheduleEmail({
     await pool.query(
       `
       UPDATE emails
-      SET
-        bullmq_job_id = $1,
-        updated_at = NOW()
+      SET bullmq_job_id = $1,
+          updated_at = NOW()
       WHERE id = $2
       `,
       [job.id, email.id]
     );
 
     email.bullmq_job_id = job.id;
-
     createdEmails.push(email);
 
     console.log(
-      `Email ${email.id} scheduled successfully.`
-    );
-
-    console.log(
-      `Recipient: ${recipientEmail}`
-    );
-
-    console.log(
-      `Sender: ${sender.email}`
-    );
-
-    console.log(
-      `BullMQ job created: ${job.id}`
+      `Email ${email.id} scheduled successfully for ${scheduledAt.toISOString()}`
     );
   }
 
   // --------------------------------------------------
-  // 7. Return campaign result
+  // 7. Return campaign data expected by email.routes.ts
   // --------------------------------------------------
 
   return {
+    success: true,
+
     sender: {
       id: sender.id,
       email: sender.email,
       displayName: sender.display_name,
     },
 
-    recipients: cleanedRecipients,
-
-    emails: createdEmails,
+    scheduledAt: scheduledAt.toISOString(),
 
     totalRecipients: createdEmails.length,
 
-    scheduledAt,
+    recipients: createdEmails,
 
-    delayBetweenEmails,
+    delayBetweenEmails: parsedDelay,
 
-    hourlyLimit,
+    hourlyLimit: parsedHourlyLimit,
 
     attachmentsCount: attachments.length,
+
+    emails: createdEmails,
   };
 }

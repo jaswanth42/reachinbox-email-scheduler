@@ -40,7 +40,6 @@ interface Attachment {
 }
 
 const API_URL = "http://localhost:5000/api";
-
 function Compose({ onClose, senders: providedSenders }: ComposeProps) {
   const [senders, setSenders] = useState<Sender[]>(providedSenders);
   const [fromEmail, setFromEmail] = useState("");
@@ -334,7 +333,7 @@ function Compose({ onClose, senders: providedSenders }: ComposeProps) {
         recipients,
         subject: subject.trim(),
         body,
-        delayBetweenEmails: Number(delay) || 0,
+        delayBetweenEmails: (Number(delay) || 0)*1000,
         hourlyLimit: Number(hourlyLimit) || 0,
         attachments: attachments.map(
           (attachment) => ({
@@ -477,8 +476,7 @@ function Compose({ onClose, senders: providedSenders }: ComposeProps) {
         body,
         scheduledAt:
           scheduledDate.toISOString(),
-        delayBetweenEmails:
-          Number(delay) || 0,
+        delayBetweenEmails: (Number(delay) || 0)*1000,
         hourlyLimit:
           Number(hourlyLimit) || 0,
         attachments: attachments.map(
@@ -795,7 +793,7 @@ function Compose({ onClose, senders: providedSenders }: ComposeProps) {
 
               <label className="setting-item">
                 <span>
-                  Delay between 2 emails
+                Delay between emails (seconds)
                 </span>
 
                 <input
